@@ -10,7 +10,8 @@ class MicrophoneScreen extends StatefulWidget {
   State<MicrophoneScreen> createState() => _MicrophoneScreenState();
 }
 
-class _MicrophoneScreenState extends State<MicrophoneScreen> {
+class _MicrophoneScreenState extends State<MicrophoneScreen>
+    with WidgetsBindingObserver {
   bool _isRecording = false;
   bool _isPaused = false;
   String? _errorMessage;
@@ -21,15 +22,50 @@ class _MicrophoneScreenState extends State<MicrophoneScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkMicrophonePermission();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Stop recording if it's active
+    if (_isRecording) {
+      MicrophoneService.stopRecording();
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // When app becomes active (user returns from settings), check permission again
+    if (state == AppLifecycleState.resumed) {
+      _checkMicrophonePermission();
+    }
   }
 
   Future<void> _checkMicrophonePermission() async {
     try {
-      final hasPermission = await PermissionService.checkMicrophonePermission();
+      bool hasPermission = await PermissionService.checkMicrophonePermission();
       if (!hasPermission) {
+        // Request permission if not already granted
+        hasPermission = await PermissionService.requestMicrophonePermission();
+
+        if (!hasPermission) {
+          setState(() {
+            _errorMessage = 'Microphone permission is required to record audio';
+          });
+        } else {
+          // Permission was granted, clear error message
+          setState(() {
+            _errorMessage = null;
+          });
+        }
+      } else {
+        // Permission is already granted, clear error message
         setState(() {
-          _errorMessage = 'Microphone permission is required to record audio';
+          _errorMessage = null;
         });
       }
     } catch (e) {
@@ -185,6 +221,31 @@ class _MicrophoneScreenState extends State<MicrophoneScreen> {
     );
   }
 
+  Future<void> _requestMicrophonePermission() async {
+    try {
+      final hasPermission =
+          await PermissionService.requestMicrophonePermission();
+      if (hasPermission) {
+        setState(() {
+          _errorMessage = null;
+        });
+        _showSnackBar('Microphone permission granted!', Colors.green);
+      } else {
+        setState(() {
+          _errorMessage = 'Microphone permission is required to record audio';
+        });
+        _showSnackBar('Microphone permission denied', Colors.red);
+      }
+    } catch (e) {
+      final errorMsg =
+          'Error requesting microphone permission: ${e.toString()}';
+      setState(() {
+        _errorMessage = errorMsg;
+      });
+      _showSnackBar(errorMsg, Colors.red);
+    }
+  }
+
   Widget _buildErrorWidget() {
     return Center(
       child: Column(
@@ -211,9 +272,19 @@ class _MicrophoneScreenState extends State<MicrophoneScreen> {
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
+            onPressed: _requestMicrophonePermission,
+            icon: const Icon(Icons.mic),
+            label: const Text('Request Permission'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
             onPressed: _checkMicrophonePermission,
             icon: const Icon(Icons.refresh),
-            label: const Text('Retry'),
+            label: const Text('Check Again'),
           ),
           const SizedBox(height: 16),
           TextButton.icon(
@@ -408,14 +479,5 @@ class _MicrophoneScreenState extends State<MicrophoneScreen> {
           ? _buildErrorWidget()
           : _buildRecordingInterface(),
     );
-  }
-
-  @override
-  void dispose() {
-    // Stop recording if it's active
-    if (_isRecording) {
-      MicrophoneService.stopRecording();
-    }
-    super.dispose();
   }
 }
